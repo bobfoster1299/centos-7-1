@@ -1,0 +1,116 @@
+---
+- hosts: all
+  become: true
+  vars:
+    extra_vars: ansible_python_interpreter=/bin/python2  # python2 required for centos 7
+    dns1: 192.168.1.5
+    dns2: 192.168.1.15
+    dns3: 192.168.1.254
+    domain: 'bobble.local'
+    ad_join_account: 'administrator'
+    vault_url: https://vault-2.bobble.local:8200/
+    #vault_token: "{{ lookup('env','VAULT_TOKEN') }}"
+    vault_token: "{{ VAULT_TOKEN }}"
+    ca_cert: ./ca.crt
+    ad_join_password: "{{ lookup('hashi_vault', 'secret=kv1/ad:ad_join_password token={{ vault_token }} url={{ vault_url }} cacert={{ ca_cert }}') }}"
+
+  handlers:
+    - name: restart firewalld
+      service:
+        name: firewalld
+        state: restarted
+      listen: restart firewalld
+
+    - name: restart sssd
+      service:
+        name: sssd
+        state: restarted
+      listen: restart sssd
+
+    - name: restart sshd
+      service:
+        name: sshd
+        state: restarted
+      listen: restart sshd
+
+    - name: restart NetworkManager
+      service:
+        name: NetworkManager
+        state: restarted
+      listen: restart NetworkManager
+
+  tasks:
+    - name: dns
+      lineinfile:
+        path: /etc/sysconfig/network-scripts/ifcfg-eth0
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        create: true
+      with_items:
+        - {regexp: '^DNS1', line: 'DNS1="{{ dns1 }}"'}
+        - {regexp: '^DNS2', line: 'DNS2="{{ dns2 }}"'}
+        - {regexp: '^DNS3', line: 'DNS3="{{ dns3 }}"'}
+        - {regexp: '^PEERDNS', line: 'PEERDNS="no"'}
+        - {regexp: '^SEARCH', line: 'SEARCH="{{ domain }} lan"'}
+      notify: restart NetworkManager
+
+    - meta: flush_handlers  # Force the restart NetworkManager handler to run straight after the above task instead of waiting until the end
+
+    - name: install packages
+      yum:
+        name:
+          - epel-release
+          - expect
+          - man-pages
+          - telnet
+          - vim-enhanced
+          - bash-completion
+          - cockpit
+          - realmd
+          - oddjob
+          - oddjob-mkhomedir
+          - sssd
+          - samba-common-tools
+          - cockpit
+          - telnet
+          - vim-enhanced
+          - bash-completion
+        state: present
+
+    - name: sshd_config
+      replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^PasswordAuthentication.*$'
+        replace: 'PasswordAuthentication yes'
+        backup: true
+      notify: restart sshd
+
+    - name: join AD
+      ansible.builtin.shell: |
+        set timeout 300
+        spawn realm join -U {{ ad_join_account }} {{ domain }}
+        expect "Password for {{ ad_join_account }}:"
+        send {{ ad_join_password }}\r
+        interact
+        exit 0
+      args:
+        executable: /bin/expect
+        creates: /etc/sssd/sssd.conf
+
+    - name: cockpit
+      service:
+        name: cockpit
+        state: started
+        enabled: true
+
+    - name: firewalld rule for cockpit
+      ansible.posix.firewalld:
+        service: cockpit
+        permanent: true
+        state: enabled
+
+    - name: sudoers
+      template:
+        src: ./files/10_admins.j2
+        dest: /etc/sudoers.d/10_admins
+        mode: '0440'
