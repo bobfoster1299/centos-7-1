@@ -1,0 +1,3 @@
+all:
+  hosts:
+    centos-7-1:
