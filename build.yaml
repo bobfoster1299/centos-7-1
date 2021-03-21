@@ -10,9 +10,9 @@
     ad_join_account: 'administrator'
     vault_url: https://vault-2.bobble.local:8200/
     #vault_token: "{{ lookup('env','VAULT_TOKEN') }}"
-    vault_token: "{{ VAULT_TOKEN }}"
+    #vault_token: "{{ VAULT_TOKEN }}"
     ca_cert: ./ca.crt
-    ad_join_password: "{{ lookup('hashi_vault', 'secret=kv1/ad:ad_join_password token={{ vault_token }} url={{ vault_url }} cacert={{ ca_cert }}') }}"
+    ad_join_password: "{{ lookup('hashi_vault', 'secret=kv1/ad:ad_join_password token={{ VAULT_TOKEN }} url={{ vault_url }} cacert={{ ca_cert }}') }}"
 
   handlers:
     - name: restart firewalld
